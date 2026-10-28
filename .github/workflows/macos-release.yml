@@ -124,6 +124,8 @@ jobs:
           name: ${{ env.DMG }}
           path: ${{ env.DMG }}*
 
+      # The release goes to the repository running this workflow (GITHUB_REPOSITORY, e.g. a
+      # fork), with its own token: no access to the source repository is needed, only reading it.
       - name: Publish the release
         if: inputs.notarize
         env:
