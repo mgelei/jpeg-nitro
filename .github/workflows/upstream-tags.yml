@@ -1,0 +1,74 @@
+# Watches the source repository for new tags and starts "macOS release" for each one that has
+# no release here yet. That run builds the app (no secrets), then its sign job waits for the
+# required reviewer of the "macos-release" environment, who gets GitHub's "review pending"
+# notification: nothing is signed, notarized or published before that approval.
+#
+# A tag is new when it sorts above the newest nitroview-* release of this repository (older
+# tags are not built). A tag that already has a "macOS release <tag>" run, finished, failed or
+# waiting, is not started again: to retry one, run "macOS release" by hand.
+#
+# Runs once a day, and by hand (with "dry run", only says what it would start). It only reads
+# the source repository's tags with git, and starts runs here with this repository's token.
+name: Watch upstream tags
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list the tags it would build
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  queue:
+    # a fork's job: the source repository can build on its own tags
+    if: github.repository != 'gereoffy/jpeg-nitro'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write        # starts "macOS release"
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SRC_REPO: gereoffy/jpeg-nitro
+      DRY_RUN: ${{ inputs.dry_run || false }}
+      MAX_RUNS: 3           # at most this many starts a day
+    steps:
+      - name: Start a release for each new tag
+        run: |
+          newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+
+          TAGS=$(git ls-remote --tags --refs "https://github.com/$SRC_REPO" 'v*' |
+                 sed 's#.*refs/tags/##' | sort -V)
+          LATEST=$(gh release list --limit 100 --json tagName --jq '.[].tagName' |
+                   sed -n 's/^nitroview-//p' | sort -V | tail -1)
+          RUNS=$(gh run list --workflow macos-release.yml --limit 200 --json displayTitle --jq '.[].displayTitle')
+          echo "newest upstream tag: $(echo "$TAGS" | tail -1), newest release here: ${LATEST:-none}"
+
+          # with no release yet, only the newest tag
+          [ -z "$LATEST" ] && TAGS=$(echo "$TAGS" | tail -1)
+          STARTED=0
+          for TAG in $TAGS; do
+            [ -n "$LATEST" ] && ! newer "$TAG" "$LATEST" && continue
+            if grep -qxF "macOS release $TAG" <<< "$RUNS"; then
+              echo "$TAG: already has a run"; continue
+            fi
+            if [ "$STARTED" -ge "$MAX_RUNS" ]; then
+              echo "::warning::$TAG: not started, $MAX_RUNS runs started already (the next ones tomorrow)"; continue
+            fi
+            if [ "$DRY_RUN" = true ]; then
+              echo "$TAG: would start \"macOS release\""
+            else
+              gh workflow run macos-release.yml --ref "${{ github.event.repository.default_branch }}" -f ref="$TAG" -f repository="$SRC_REPO"
+              echo "::notice::$TAG: started \"macOS release\", its sign job waits for approval"
+            fi
+            STARTED=$((STARTED + 1))
+          done
+          [ "$STARTED" -eq 0 ] && echo "nothing new"
+          true

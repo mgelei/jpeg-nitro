@@ -14,7 +14,8 @@
 # submissions can take hours), it ends with the signed dmg and the submission ID kept as a
 # workflow artifact: "macOS release: finish" (macos-release-finish.yml) publishes it later.
 #
-# Runs only when started by hand (Actions > macOS release > Run workflow). Environment secrets:
+# Started by hand (Actions > macOS release > Run workflow), or for a new upstream tag by "Watch
+# upstream tags" (upstream-tags.yml). Environment secrets:
 #   MACOS_CERT_P12       Developer ID Application certificate + key (.p12), base64
 #   MACOS_CERT_PASSWORD  the .p12's password
 #   MACOS_SIGN_ID        "Developer ID Application: Name (TEAMID)"
@@ -24,6 +25,8 @@
 # With "notarize" unticked only the build job runs and keeps an ad-hoc signed dmg as a workflow
 # artifact: a test of the build on the runner.
 name: macOS release
+# "Watch upstream tags" (upstream-tags.yml) finds the runs it started by this name
+run-name: macOS release ${{ inputs.ref }}${{ !inputs.notarize && ' (test build)' || '' }}
 
 on:
   workflow_dispatch:
